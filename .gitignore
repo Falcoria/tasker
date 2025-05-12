@@ -1,0 +1,26 @@
+# Ignore all .env files
+.env*
+**/.env*
+
+# Ignore Python virtual environments
+.venv/
+**/.venv/
+venv/
+**/venv/
+
+# Ignore Python cache files and folders
+__pycache__/
+**/__pycache__/
+*.py[cod]
+
+# Ignore VSCode settings and editor files
+.vscode/
+
+# Ignore Alembic generated migration files
+migrations/versions/
+deprecated/
+
+# Ignore app data except tracked placeholders
+app/data/*
+!app/data/.gitkeep
+
