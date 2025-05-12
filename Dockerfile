@@ -1,4 +1,3 @@
- cat ../scanledger/Dockerfile 
 FROM unit:1.34.2-python3.13
 
 WORKDIR /app
