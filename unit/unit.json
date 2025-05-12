@@ -1,0 +1,33 @@
+{
+    "listeners": {
+        "*:443": {
+            "pass": "routes",
+            "tls": {
+                "certificate": "bundle"
+            }
+        }
+    },
+    "routes": [
+        {
+            "match": {
+                "uri": "/*"
+            },
+            "action": {
+                "pass": "applications/tasker"
+            }
+        }
+    ],
+    "applications": {
+        "tasker": {
+            "type": "python",
+            "path": "/app",
+            "home": "/app/venv",
+            "module": "app.app",
+            "callable": "fastapi_app",
+            "user": "root"
+        }
+    },
+    "access_log": {
+        "path": "stderr"
+    }
+}
