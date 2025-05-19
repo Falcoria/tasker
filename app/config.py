@@ -1,6 +1,4 @@
 import os
-
-from typing import Optional
 from enum import Enum
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -13,7 +11,6 @@ class Environment(str, Enum):
 
 class Config(BaseSettings):
     backend_url: str = "http://localhost:8000"
-    #tasker_backend_token: str
 
     # Redis
     redis_host: str
@@ -37,12 +34,6 @@ class Config(BaseSettings):
     nmap_scan_routing_key: str = "nmap.scan"
     nmap_cancel_routing_key: str = "nmap.cancel"
 
-    # Nmap
-    #nmap_open_ports_opts: str = "-p- --open"
-    nmap_open_ports_opts: str = "-p 80,443 --open"
-    nmap_service_opts: str = "-sV -Pn -T4"
-    nmap_timeout: int = 600
-
     # File upload
     max_file_upload_size: int = 1_000_000  # 1 MB
     default_chunk_size: int = 1024
@@ -58,6 +49,11 @@ class Config(BaseSettings):
     postgres_port: int = 5432
     postgres_db: str
     tasker_default_username: str = "tasker"
+
+    environment: str = Environment.development
+    
+    docs_url: str | None = None
+    redoc_url: str | None = None
 
     # Concurrency
     concurrency_factor: int = 5
@@ -82,5 +78,14 @@ class Config(BaseSettings):
     def cpu_count(self) -> int:
         return os.cpu_count() or 1
 
+    def configure(self):
+        if self.environment == Environment.development:
+            self.logger_level = "DEBUG"
+        elif self.environment == Environment.production:
+            self.logger_level = "INFO"
+            self.docs_url = None
+            self.redoc_url = None
+
 
 config = Config()
+config.configure()
