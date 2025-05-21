@@ -40,8 +40,8 @@ class OpenPortsOpts(BaseModel):
     min_rtt_timeout_ms: Optional[int] = Field(default=None, ge=1, le=60000, description="--min-rtt-timeout")
     max_rtt_timeout_ms: Optional[int] = Field(default=None, ge=1, le=60000, description="--max-rtt-timeout")
     initial_rtt_timeout_ms: Optional[int] = Field(default=None, ge=1, le=60000, description="--initial-rtt-timeout")
-    min_rate: Optional[int] = Field(default=None, ge=1, le=5000, description="--min-rate")
-    max_rate: Optional[int] = Field(default=None, ge=1, le=5000, description="--max-rate")
+    min_rate: Optional[int] = Field(default=None, ge=1, le=30000, description="--min-rate")
+    max_rate: Optional[int] = Field(default=None, ge=1, le=30000, description="--max-rate")
     ports: List[str] = Field(
         ...,  # Ellipsis makes the field required
         description="List of ports or port ranges (e.g., '22', '80', '1000-2000')"
