@@ -3,7 +3,7 @@ from uuid import UUID
 
 from typing import Optional, List, Annotated
 
-from pydantic import BaseModel, Field, constr, field_validator
+from pydantic import BaseModel, Field, constr, field_validator, PrivateAttr
 
 
 class TaskNames(str, Enum):
@@ -135,6 +135,7 @@ class ServiceOpts(OpenPortsOpts):
     os_detection: bool = Field(default=False, description="Enable OS detection (-O)")
     traceroute: bool = Field(default=False, description="Trace hop path to each host (--traceroute)")
     #service_version: bool = Field(default=True, description="Probe open ports to determine service/version info (-sV)")
+    _force_service_version: bool = PrivateAttr(default=True)
 
     def to_nmap_args(self) -> List[str]:
         args = super().to_nmap_args()
@@ -149,6 +150,8 @@ class ServiceOpts(OpenPortsOpts):
             args.append("-O")
         if self.traceroute:
             args.append("--traceroute")
+        if self._force_service_version:
+            args.append("-sV")
 
         return args
 
