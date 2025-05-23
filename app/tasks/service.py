@@ -83,6 +83,8 @@ async def send_nmap_tasks(
             open_ports_opts=open_ports_opts,
             service_opts=service_opts,
             timeout=nmap_scan_request.timeout,
+            include_services=nmap_scan_request.include_services,
+            mode=nmap_scan_request.mode,
         )
         try:
             task_id = send_scan(task)

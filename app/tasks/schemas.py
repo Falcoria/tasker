@@ -6,6 +6,13 @@ from typing import Optional, List, Annotated
 from pydantic import BaseModel, Field, constr, field_validator, PrivateAttr
 
 
+class ImportMode(str, Enum):
+    INSERT = "insert"
+    REPLACE = "replace"
+    UPDATE = "update"
+    APPEND = "append"
+
+
 class TaskNames(str, Enum):
     PROJECT_SCAN = "project.nmap.scan"
     PROJECT_CANCEL = "project.nmap.cancel"
@@ -162,6 +169,8 @@ class NmapTask(BaseModel):
     open_ports_opts: str
     service_opts: str
     timeout: int
+    include_services: bool
+    mode: ImportMode
 
 
 HostName = Annotated[
@@ -177,7 +186,9 @@ class RunNmapRequest(BaseModel):
     hosts: List[HostName]
     open_ports_opts: OpenPortsOpts
     service_opts: ServiceOpts
-    timeout: int = Field(default=1200, ge=1, le=60*60*24, description="Timeout in seconds for the scan")
+    timeout: int = Field(..., ge=1, le=60*60*24, description="Timeout in seconds for the scan")
+    include_services: bool = Field(..., description="Include service detection in the scan",)
+    mode: ImportMode = Field(..., description="Import mode for the scan results")
 
 
 class RunNmapWithProject(RunNmapRequest):
