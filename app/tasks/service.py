@@ -3,13 +3,12 @@ import socket
 from ipaddress import ip_address, IPv4Address
 from typing import List
 
-from .schemas import NmapTask, RunNmapWithProject
-from .utils import read_and_decode_file
-from .redis_tracker import track_task_id, get_task_ids, remove_task_id
+from .schemas import NmapTask, RunNmapWithProject, ImportMode
+from .redis_tracker import track_task_id, get_task_ids, remove_task_id, track_ip_task, get_ip_task_map
 
 from app.logger import logger
 from app.config import config
-
+from app.connectors.scanledger_connector import scanledger_connector
 from app.celery_app import send_scan, send_cancel, celery_app
 
 
@@ -59,6 +58,64 @@ def remove_duplicates(entries: list[str]) -> list[str]:
     return list(set(entries))
 
 
+async def get_known_targets_from_scanledger(project_id: str) -> set[str]:
+    """
+    Return a combined set of all known IPs and hostnames from ScanLedger.
+    """
+    try:
+        entries = await scanledger_connector.get_ips(project_id)
+        result = set()
+        for item in entries:
+            ip = item.get("ip")
+            if ip:
+                result.add(ip)
+            hostnames = item.get("hostnames", [])
+            if hostnames:
+                result.update(hostnames)
+        logger.info(f"Targets from ScanLedger for project {project_id}: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"Error retrieving known targets from ScanLedger for project {project_id}: {e}")
+        return set()
+
+
+async def get_targets_from_redis(project_id: str) -> set[str]:
+    """
+    Get IPs from Redis (currently queued) as a set.
+    Decodes bytes to strings.
+    """
+    try:
+        ip_task_map = await get_ip_task_map(project_id)
+        if not ip_task_map:
+            logger.warning(f"No IPs found in Redis for project {project_id}.")
+            return set()
+
+        ips = {k.decode() if isinstance(k, bytes) else k for k in ip_task_map.keys()}
+        logger.info(f"Targets in Redis for project {project_id}: {ips}")
+        return ips
+
+    except Exception as e:
+        logger.error(f"Error retrieving targets from Redis for project {project_id}: {e}")
+        return set()
+
+
+async def get_insertable_ips(project_id: str, mode: ImportMode, candidates: list[str]) -> list[str]:
+    """
+    Return only IPs/hostnames that are not in ScanLedger or in Redis,
+    respecting INSERT mode deduplication.
+    """
+    if mode != ImportMode.INSERT:
+        return candidates
+
+    known_targets = await get_known_targets_from_scanledger(project_id)
+    queued_targets = await get_targets_from_redis(project_id)
+
+    all_excluded = known_targets.union(queued_targets)
+    filtered = [ip for ip in candidates if ip not in all_excluded]
+    logger.info(f"Insert-mode filtered targets for project {project_id}: {filtered}")
+    return filtered
+
+
 async def send_nmap_tasks(
     nmap_scan_request: RunNmapWithProject,
 ) -> dict[str, bool] | None:
@@ -71,12 +128,23 @@ async def send_nmap_tasks(
         logger.warning("No valid IPs or hostnames found.")
         return None
 
-    for target in valid_targets:
-        open_ports_opts_list = nmap_scan_request.open_ports_opts.to_nmap_args()
-        open_ports_opts = " ".join(open_ports_opts_list)
-        service_opts_list = nmap_scan_request.service_opts.to_nmap_args()
-        service_opts = " ".join(service_opts_list)
-        
+    # Filter out duplicates in insert mode
+    filtered_targets = await get_insertable_ips(
+        nmap_scan_request.project_id,
+        nmap_scan_request.mode,
+        valid_targets
+    )
+
+    if not filtered_targets:
+        logger.warning(f"No insertable IPs remaining after deduplication for project {nmap_scan_request.project_id}")
+
+    # Initialize final results with all valid targets as False (not sent)
+    final_results = {target: False for target in valid_targets}
+
+    for target in filtered_targets:
+        open_ports_opts = " ".join(nmap_scan_request.open_ports_opts.to_nmap_args())
+        service_opts = " ".join(nmap_scan_request.service_opts.to_nmap_args())
+
         task = NmapTask(
             ip=target,
             project=nmap_scan_request.project_id,
@@ -89,12 +157,14 @@ async def send_nmap_tasks(
         try:
             task_id = send_scan(task)
             await track_task_id(nmap_scan_request.project_id, task_id)
+            await track_ip_task(nmap_scan_request.project_id, target, task_id)
             logger.info(f"Task sent for {target} in project '{nmap_scan_request.project_id}' with ID {task_id}")
+            final_results[target] = True
         except Exception as e:
             logger.error(f"Error sending task for {target}: {e}")
             continue
 
-    return validation_results
+    return final_results
 
 
 async def revoke_tasks(task_ids: List[str | bytes], project_id: str) -> bool:

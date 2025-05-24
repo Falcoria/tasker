@@ -10,7 +10,8 @@ class Environment(str, Enum):
 
 
 class Config(BaseSettings):
-    backend_url: str = "http://localhost:8000"
+    scanledger_base_url: str
+    tasker_auth_token: str
 
     # Redis
     redis_host: str
@@ -40,7 +41,7 @@ class Config(BaseSettings):
 
     # Logger
     logger_level: str = "INFO"
-    logger_name: str = "backend_logger"
+    logger_name: str = "tasker_logger"
 
     # Database
     postgres_user: str
