@@ -53,8 +53,9 @@ class Config(BaseSettings):
 
     environment: str = Environment.development
     
-    docs_url: str | None = None
-    redoc_url: str | None = None
+    docs_url: str | None = "/docs"
+    redoc_url: str | None = "/redoc"
+    openapi_url: str | None = "/openapi.json"
 
     # Concurrency
     concurrency_factor: int = 5
@@ -86,6 +87,7 @@ class Config(BaseSettings):
             self.logger_level = "INFO"
             self.docs_url = None
             self.redoc_url = None
+            self.openapi_url = None
 
 
 config = Config()
