@@ -24,3 +24,8 @@ async def get_ip_task_map(project: str):
     key = f"project:{project}:ip_task_map"
     ips = await async_redis_client.hgetall(key)
     return ips
+
+async def remove_ip_task(project: str, ip: str):
+    key = f"project:{project}:ip_task_map"
+    await async_redis_client.hdel(key, ip)
+    return

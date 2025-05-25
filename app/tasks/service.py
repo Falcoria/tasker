@@ -4,7 +4,14 @@ from ipaddress import ip_address, IPv4Address
 from typing import List
 
 from .schemas import NmapTask, RunNmapWithProject, ImportMode
-from .redis_tracker import track_task_id, get_task_ids, remove_task_id, track_ip_task, get_ip_task_map
+from .redis_tracker import (
+    track_task_id, 
+    get_task_ids, 
+    remove_task_id, 
+    track_ip_task, 
+    get_ip_task_map, 
+    remove_ip_task
+)
 
 from app.logger import logger
 from app.config import config
@@ -143,6 +150,7 @@ async def send_nmap_tasks(
 
     for target in filtered_targets:
         open_ports_opts = " ".join(nmap_scan_request.open_ports_opts.to_nmap_args())
+        nmap_scan_request.service_opts._transport_protocol = nmap_scan_request.open_ports_opts.transport_protocol
         service_opts = " ".join(nmap_scan_request.service_opts.to_nmap_args())
 
         task = NmapTask(
@@ -176,6 +184,7 @@ async def revoke_tasks(task_ids: List[str | bytes], project_id: str) -> bool:
             logger.info(f"Task {tid} revoked.")
 
             await remove_task_id(project_id, tid)
+            await remove_ip_task(project_id, tid)
             logger.info(f"Task ID {tid} removed from Redis.")
         except Exception as e:
             logger.error(f"Failed to revoke task {tid}: {e}")
