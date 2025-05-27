@@ -20,7 +20,6 @@ __pycache__/
 migrations/versions/
 deprecated/
 
-# Ignore app data except tracked placeholders
-app/data/*
-!app/data/.gitkeep
-
+# Ignore everything in unit/ except unit.json
+unit/*
+!unit/unit.json

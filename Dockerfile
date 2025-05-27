@@ -11,5 +11,4 @@ RUN python3.13 -m venv venv && \
 COPY . .
 
 # Copy the TLS bundle and Unit config
-COPY unit/bundle.pem /docker-entrypoint.d/bundle.pem
 COPY unit/unit.json /docker-entrypoint.d/config.json
