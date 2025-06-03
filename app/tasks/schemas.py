@@ -40,8 +40,8 @@ class TransportProtocol(str, Enum):
 class CommonScanOpts(BaseModel):
     dns_resolution: Optional[bool] = Field(default=None, description="-n (False), -R (True)")
     max_retries: Optional[int] = Field(default=None, ge=0, le=20, description="--max-retries")
-    min_parallelism: Optional[int] = Field(default=None, ge=1, le=700, description="--min-parallelism")
-    max_parallelism: Optional[int] = Field(default=None, ge=1, le=700, description="--max-parallelism")
+    #min_parallelism: Optional[int] = Field(default=None, ge=1, le=700, description="--min-parallelism")
+    #max_parallelism: Optional[int] = Field(default=None, ge=1, le=700, description="--max-parallelism")
     min_rtt_timeout_ms: Optional[int] = Field(default=None, ge=1, le=60000, description="--min-rtt-timeout")
     max_rtt_timeout_ms: Optional[int] = Field(default=None, ge=1, le=60000, description="--max-rtt-timeout")
     initial_rtt_timeout_ms: Optional[int] = Field(default=None, ge=1, le=60000, description="--initial-rtt-timeout")
@@ -57,11 +57,11 @@ class CommonScanOpts(BaseModel):
         if self.max_retries is not None:
             args.append(f"--max-retries {self.max_retries}")
 
-        if self.min_parallelism is not None:
-            args.append(f"--min-parallelism {self.min_parallelism}")
+        #if self.min_parallelism is not None:
+        #    args.append(f"--min-parallelism {self.min_parallelism}")
 
-        if self.max_parallelism is not None:
-            args.append(f"--max-parallelism {self.max_parallelism}")
+        #if self.max_parallelism is not None:
+        #    args.append(f"--max-parallelism {self.max_parallelism}")
 
         if self.min_rtt_timeout_ms is not None:
             args.append(f"--min-rtt-timeout {self.min_rtt_timeout_ms}ms")
