@@ -70,7 +70,7 @@ async def get_known_targets_from_scanledger(project_id: str) -> set[str]:
     Return a combined set of all known IPs and hostnames from ScanLedger.
     """
     try:
-        entries = await scanledger_connector.get_ips(project_id)
+        entries = await scanledger_connector.get_ips(project_id, has_ports=False)
         result = set()
         for item in entries:
             ip = item.get("ip")
