@@ -175,6 +175,13 @@ async def send_nmap_tasks(
     return final_results
 
 
+async def remove_ip_by_task_id(project_id: str, task_id: str):
+    ip_task_map = await get_ip_task_map(project_id)
+    for ip, stored_tid in ip_task_map.items():
+        if (stored_tid.decode() if isinstance(stored_tid, bytes) else stored_tid) == task_id:
+            await remove_ip_task(project_id, ip)
+
+
 async def revoke_tasks(task_ids: List[str | bytes], project_id: str) -> bool:
     """Revoke a task by its ID."""
     for tid in task_ids:
@@ -184,7 +191,7 @@ async def revoke_tasks(task_ids: List[str | bytes], project_id: str) -> bool:
             logger.info(f"Task {tid} revoked.")
 
             await remove_task_id(project_id, tid)
-            await remove_ip_task(project_id, tid)
+            await remove_ip_by_task_id(project_id, tid)
             logger.info(f"Task ID {tid} removed from Redis.")
         except Exception as e:
             logger.error(f"Failed to revoke task {tid}: {e}")
