@@ -29,7 +29,9 @@ class Config(BaseSettings):
     # Celery
     celery_app_name: str = "tasker"
     nmap_exchange_name: str = "nmap_exchange"
+    nmap_cancel_exchange_name: str = "nmap_cancel_exchange"
     exchange_type: str = "topic"
+    nmap_cancel_exchange_type: str = "fanout"
     nmap_scan_queue_name: str = "nmap_scan_queue"
     nmap_cancel_queue_name: str = "nmap_cancel_queue"
     nmap_scan_routing_key: str = "nmap.scan"

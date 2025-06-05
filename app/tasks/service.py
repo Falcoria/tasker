@@ -187,8 +187,7 @@ async def revoke_tasks(task_ids: List[str | bytes], project_id: str) -> bool:
     for tid in task_ids:
         tid = tid.decode() if isinstance(tid, bytes) else tid
         try:
-            #celery_app.control.revoke(tid, terminate=False)
-            celery_app.control.revoke(tid, terminate=True, signal="SIGTERM")
+            celery_app.control.revoke(tid, terminate=False)
             logger.info(f"Task {tid} revoked.")
 
             await remove_task_id(project_id, tid)
