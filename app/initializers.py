@@ -34,8 +34,3 @@ async def init_tasker_service_user():
         generate_unique_token(), 
         isadmin=True
     )
-
-
-#async def create_directories():
-#    await create_directory(config.projects_dir)
-#    await create_directory(config.attachment_dir)

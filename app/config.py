@@ -37,6 +37,9 @@ class Config(BaseSettings):
     nmap_scan_routing_key: str = "nmap.scan"
     nmap_cancel_routing_key: str = "nmap.cancel"
 
+    worker_service_broadcast_queue: str = "worker_service_broadcast"
+    worker_ip_update_ttl: int = 3700
+
     # File upload
     max_file_upload_size: int = 1_000_000  # 1 MB
     default_chunk_size: int = 1024
