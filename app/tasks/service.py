@@ -1,6 +1,6 @@
 import asyncio
 import socket
-from ipaddress import ip_address, IPv4Address
+from ipaddress import ip_address, IPv4Address, ip_network
 from typing import List
 
 from .schemas import NmapTask, RunNmapWithProject, ImportMode
@@ -33,6 +33,7 @@ async def resolve_hostname(hostname: str) -> str:
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, socket.gethostbyname, hostname)
 
+
 async def resolve_and_check_public(hostname: str) -> bool:
     """Resolve hostname and check if the resolved IP is public."""
     try:
@@ -43,14 +44,26 @@ async def resolve_and_check_public(hostname: str) -> bool:
         return False
 
 
+def expand_cidr(cidr: str) -> list[str]:
+    try:
+        network = ip_network(cidr, strict=False)
+        return [str(ip) for ip in network.hosts()]  # hosts(), not all addresses (skip network/broadcast)
+    except ValueError:
+        return []
+
+
 async def validate_ips_and_hostnames(entries: list[str]) -> dict:
-    """Validate a list of IP addresses and hostnames with concurrency limits."""
     results = {}
     semaphore = asyncio.Semaphore(config.optimal_semaphore)
 
     async def validate(entry: str):
-        async with semaphore:  # Limit concurrent calls
-            if is_public_ip(entry):
+        async with semaphore:
+            if "/" in entry:
+                expanded_ips = expand_cidr(entry)
+                logger.debug(f"Expanded CIDR {entry} to {len(expanded_ips)} IPs.")
+                for ip in expanded_ips:
+                    results[ip] = is_public_ip(ip)
+            elif is_public_ip(entry):
                 results[entry] = True
             else:
                 results[entry] = await resolve_and_check_public(entry)
@@ -125,15 +138,19 @@ async def get_insertable_ips(project_id: str, mode: ImportMode, candidates: list
 
 async def send_nmap_tasks(
     nmap_scan_request: RunNmapWithProject,
-) -> dict[str, bool] | None:
+) -> dict[str, bool]:
     """Send Nmap tasks to RabbitMQ and track task IDs in Redis."""
     targets = remove_duplicates(nmap_scan_request.hosts)
     validation_results = await validate_ips_and_hostnames(targets)
 
+    # Always initialize final_results for all original targets
+    final_results = {target: is_valid for target, is_valid in validation_results.items()}
+
     valid_targets = [t for t, is_valid in validation_results.items() if is_valid]
     if not valid_targets:
         logger.warning("No valid IPs or hostnames found.")
-        return None
+        # Return consistent structure even if no valid targets
+        return final_results
 
     # Filter out duplicates in insert mode
     filtered_targets = await get_insertable_ips(
@@ -145,10 +162,23 @@ async def send_nmap_tasks(
     if not filtered_targets:
         logger.warning(f"No insertable IPs remaining after deduplication for project {nmap_scan_request.project_id}")
 
-    # Initialize final results with all valid targets as False (not sent)
-    final_results = {target: False for target in valid_targets}
+    ## Check allowed hosts. For playground
+    allowed_hosts = config.allowed_hosts_list
 
-    for target in filtered_targets:
+    if allowed_hosts:
+        allowed_set = set(allowed_hosts)
+        allowed_targets = [t for t in filtered_targets if t in allowed_set]
+        disallowed_targets = [t for t in filtered_targets if t not in allowed_set]
+
+        # mark disallowed targets as False explicitly
+        for t in disallowed_targets:
+            logger.warning(f"Target '{t}' is not allowed by allowed_hosts restriction — skipping.")
+            final_results[t] = False
+    else:
+        allowed_targets = filtered_targets
+    # end of section for allowed hosts
+
+    for target in allowed_targets:
         open_ports_opts = " ".join(nmap_scan_request.open_ports_opts.to_nmap_args())
         nmap_scan_request.service_opts._transport_protocol = nmap_scan_request.open_ports_opts.transport_protocol
         service_opts = " ".join(nmap_scan_request.service_opts.to_nmap_args())
