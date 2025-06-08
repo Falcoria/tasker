@@ -66,6 +66,9 @@ class Config(BaseSettings):
     concurrency_factor: int = 5
     max_semaphore_limit: int = 50
 
+    # Allowed hosts to scan
+    allowed_hosts: str = ""
+
     model_config = SettingsConfigDict(env_file=".env")
 
     @property
@@ -84,6 +87,12 @@ class Config(BaseSettings):
     @property
     def cpu_count(self) -> int:
         return os.cpu_count() or 1
+    
+    @property
+    def allowed_hosts_list(self) -> list[str]:
+        if not self.allowed_hosts:
+            return []
+        return [host.strip() for host in self.allowed_hosts.split(",") if host.strip()]
 
     def configure(self):
         if self.environment == Environment.development:
