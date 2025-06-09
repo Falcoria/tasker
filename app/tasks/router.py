@@ -32,7 +32,7 @@ async def run_nmap(
 async def status(
         project_and_user: Annotated[str, Depends(validate_project_access)]
     ):
-    result = await get_project_task_summary(project=project_and_user[0].id)
+    result = await get_project_task_summary(project_id=project_and_user[0].id)
     return result
 
 
