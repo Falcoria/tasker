@@ -3,7 +3,7 @@ from app.connectors.base import BaseConnector
 
 
 ROUTES = {
-    "ips_list": "projects/{project_id}/ips",
+    "ips_list": "projects/{project_id}/ips"
 }
 
 
@@ -15,6 +15,11 @@ class ScanledgerConnector(BaseConnector):
         query = {"has_ports": has_ports}
         endpoint = ROUTES["ips_list"].format(project_id=project_id)
         response = await self.make_request(endpoint, query_params=query)
+        return self._handle_response(response)
+    
+    async def post_ips(self, project_id: str, body: dict, query: dict = None):
+        endpoint = ROUTES["ips_list"].format(project_id=project_id)
+        response = await self.make_request(endpoint, method="POST", json=body, query_params=query)
         return self._handle_response(response)
 
 

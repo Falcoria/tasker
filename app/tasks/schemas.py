@@ -1,9 +1,41 @@
+import re
+import ipaddress
+
+from pydantic.networks import IPvAnyAddress, IPvAnyNetwork
+
 from enum import Enum
 from uuid import UUID
 
-from typing import Optional, List, Annotated
+from dataclasses import dataclass
+from typing import Optional, List, Annotated, Dict
 
-from pydantic import BaseModel, Field, constr, field_validator, PrivateAttr, ConfigDict
+from pydantic import BaseModel, Field, constr, field_validator, PrivateAttr
+
+
+class TargetDeclineReason(str, Enum):
+    ALREADY_IN_SCANLEDGER = "already_in_scanledger"
+    ALREADY_IN_QUEUE = "already_in_queue"
+    UNRESOLVABLE = "unresolvable"
+    PRIVATE_IP = "private_ip"
+    OTHER = "other"
+    FORBIDDEN = "forbidden"
+
+
+class PreparedTarget(BaseModel):
+    hostnames: List[str] = Field(
+        default_factory=list,
+        description="List of hostnames associated with the target"
+    )
+    valid: bool = Field(default=True, description="Indicates if the target is valid")
+    reason: Optional[TargetDeclineReason] = Field(
+        default=None,
+        description="Reason why the target was declined, if not valid"
+    )
+
+    @field_validator("hostnames")
+    @classmethod
+    def unique_hostnames(cls, v):
+        return list(set(v))
 
 
 class ImportMode(str, Enum):
@@ -153,6 +185,10 @@ class ServiceOpts(CommonScanOpts):
 
 class NmapTask(BaseModel):
     ip: str
+    hostnames: List[str] = Field(
+        default_factory=list,
+        description="List of hostnames associated with the target IP"
+    )
     project: UUID
     open_ports_opts: str
     service_opts: str
@@ -161,22 +197,49 @@ class NmapTask(BaseModel):
     mode: ImportMode
 
 
-HostName = Annotated[
-    str,
-    constr(
-        max_length=253,
-        # not valid.
-        pattern=r"^((?:(?!-)[A-Za-z0-9-]{1,63}(?<!-)\.)+[A-Za-z]{2,63}|(?:\d{1,3}\.){3}\d{1,3})$"
-    )
-]
-
 class RunNmapRequest(BaseModel):
-    hosts: List[HostName]
+    hosts: List[str]
     open_ports_opts: OpenPortsOpts
     service_opts: ServiceOpts
     timeout: int = Field(..., ge=1, le=60*60*24, description="Timeout in seconds for the scan")
-    include_services: bool = Field(..., description="Include service detection in the scan",)
+    include_services: bool = Field(..., description="Include service detection in the scan")
     mode: ImportMode = Field(..., description="Import mode for the scan results")
+
+    @field_validator('hosts', mode='before')
+    @classmethod
+    def validate_hosts(cls, hosts: List[str]) -> List[str]:
+        validated_hosts = []
+        for host in hosts:
+            # Check IP
+            try:
+                IPvAnyAddress(host)
+                validated_hosts.append(host)
+                continue
+            except ValueError:
+                pass
+
+            # Check CIDR
+            try:
+                IPvAnyNetwork(host)
+                validated_hosts.append(host)
+                continue
+            except ValueError:
+                pass
+
+            # Check FQDN
+            if not re.match(
+                r'^((?!-)[A-Za-z0-9-]{1,63}(?<!-)\.)+[A-Za-z]{2,63}$',
+                host,
+                re.IGNORECASE
+            ):
+                raise ValueError(f'Invalid host format "{host}" — must be IP, CIDR, or FQDN')
+
+            if len(host) > 253:
+                raise ValueError('FQDN must be 253 characters or less')
+
+            validated_hosts.append(host)
+
+        return validated_hosts
 
 
 class RunNmapWithProject(RunNmapRequest):

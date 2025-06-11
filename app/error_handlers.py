@@ -2,6 +2,8 @@ from fastapi import Request, FastAPI
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
+
 from app.config import config, Environment
 
 
@@ -14,13 +16,12 @@ def register_error_handlers(app: FastAPI):
             content={"detail": detail},
         )
 
-
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
         if config.environment == Environment.development:
             return JSONResponse(
                 status_code=422,
-                content={"detail": exc.errors()},
+                content={"detail": jsonable_encoder(exc.errors())},   # <--- this line is the fix
             )
         else:
             return JSONResponse(
