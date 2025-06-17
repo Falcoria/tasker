@@ -1,7 +1,20 @@
+import socket
+
 import aiofiles
 import aiofiles.os
+import aiodns
 
 from app.logger import logger
+
+
+resolver = aiodns.DNSResolver()
+
+async def fast_resolve_hostname(hostname: str) -> list[str]:
+    try:
+        result = await resolver.gethostbyname(hostname, socket.AF_INET)
+        return result.addresses
+    except Exception:
+        return []
 
 
 async def delete_file(filepath: str):

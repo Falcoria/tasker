@@ -3,8 +3,20 @@ import socket
 from ipaddress import ip_address, IPv4Address, ip_network
 from typing import List
 
-from .schemas import NmapTask, RunNmapWithProject, ImportMode, PreparedTarget, TargetDeclineReason
+from .schemas import (
+    NmapTask, 
+    RunNmapWithProject, 
+    ImportMode, 
+    PreparedTarget, 
+    TargetDeclineReason,
+    RefusedCounts,
+    ProjectTaskSummary,
+    ScanStartResponse,
+    ScanStartSummary,
+    RevokeResponse
+)
 from .redis_tracker import RedisTaskTracker
+from .utils import fast_resolve_hostname
 
 from app.logger import logger
 from app.config import config
@@ -12,9 +24,6 @@ from app.connectors.scanledger_connector import scanledger_connector
 from app.celery_app import send_scan, send_cancel, celery_app
 
 
-from ipaddress import ip_network, ip_address, IPv4Address
-import asyncio
-import socket
 
 # Define known private ranges per RFC1918
 PRIVATE_RANGES = [
@@ -79,20 +88,20 @@ def expand_cidr(cidr: str) -> list[str]:
 
 async def resolve_targets_to_prepared_targets(entries: list[str]) -> dict[str, PreparedTarget]:
     ip_to_prepared_target: dict[str, PreparedTarget] = {}
-    semaphore = asyncio.Semaphore(config.optimal_semaphore)
+    semaphore = asyncio.Semaphore(config.dns_resolve_semaphore_limit)
 
     async def process_cidr(entry: str):
         expanded_ips = expand_cidr(entry)
         for ip in expanded_ips:
             if is_public_ip(ip):
                 ip_to_prepared_target[ip] = PreparedTarget(
-                    hostnames=[ip],  # treat IP as self-hostname
+                    hostnames=[],  # Correct: no hostnames for pure IPs
                     valid=True
                 )
 
     async def process_ip(entry: str):
         ip_to_prepared_target[entry] = PreparedTarget(
-            hostnames=[entry],
+            hostnames=[],  # Correct: no hostnames for pure IPs
             valid=True
         )
 
@@ -101,7 +110,7 @@ async def resolve_targets_to_prepared_targets(entries: list[str]) -> dict[str, P
 
         for attempt in range(1, max_attempts + 1):
             try:
-                resolved_ips = await asyncio.wait_for(resolve_hostname(entry), timeout=2.0)
+                resolved_ips = await asyncio.wait_for(fast_resolve_hostname(entry), timeout=2.0)
                 logger.info(f"Resolved hostname {entry} (attempt {attempt}) → {resolved_ips}")
 
                 public_ips = [ip for ip in resolved_ips if is_public_ip(ip)]
@@ -308,17 +317,16 @@ async def send_nmap_task_for_target(
     return task_id
 
 
-async def send_nmap_tasks(
-    nmap_scan_request: RunNmapWithProject,
-) -> dict[str, PreparedTarget]:
-    """Send Nmap tasks to RabbitMQ and track task IDs in Redis. Return prepared_targets dict."""
-    # Deduplicate input
+async def prepare_scan_targets(
+    nmap_scan_request: RunNmapWithProject
+) -> tuple[dict[str, PreparedTarget], ScanStartSummary, RedisTaskTracker]:
+
     deduplicated_hosts = remove_duplicates(nmap_scan_request.hosts)
+
     prepared_targets = await resolve_targets_to_prepared_targets(deduplicated_hosts)
 
     redis_tracker = RedisTaskTracker(nmap_scan_request.project_id)
 
-    # Update prepared_targets with ScanLedger/Redis checks
     prepared_targets = await get_targets_to_scan(
         nmap_scan_request.project_id,
         nmap_scan_request.mode,
@@ -326,10 +334,35 @@ async def send_nmap_tasks(
         redis_tracker
     )
 
-    # Filter allowed targets → updates prepared_targets in-place
     filter_allowed_targets(prepared_targets)
 
-    # Prepare list of IPs to scan (final pass)
+    summary = ScanStartSummary(
+        provided=len(nmap_scan_request.hosts),
+        duplicates_removed=len(nmap_scan_request.hosts) - len(deduplicated_hosts),
+        resolved_ips=len(prepared_targets),
+        refused=RefusedCounts(),
+        sent_to_scan=0
+    )
+
+    for target in prepared_targets.values():
+        if not target.valid and target.reason:
+            reason_key = target.reason.value
+            if hasattr(summary.refused, reason_key):
+                current_value = getattr(summary.refused, reason_key)
+                setattr(summary.refused, reason_key, current_value + 1)
+            else:
+                summary.refused.other += 1
+
+    return prepared_targets, summary, redis_tracker
+
+
+async def send_scan_tasks(
+    prepared_targets: dict[str, PreparedTarget],
+    nmap_scan_request: RunNmapWithProject,
+    redis_tracker: RedisTaskTracker,
+    summary: ScanStartSummary
+) -> ScanStartSummary:
+
     targets_to_scan = [
         ip for ip, target in prepared_targets.items()
         if target.valid
@@ -337,13 +370,14 @@ async def send_nmap_tasks(
 
     if not targets_to_scan:
         logger.info(f"No targets to scan for project {nmap_scan_request.project_id}.")
-        return prepared_targets
-    else:
-        logger.info(f"Sending Nmap tasks for {len(targets_to_scan)} targets in project {nmap_scan_request.project_id}: {targets_to_scan}")
+        return summary
+
+    logger.info(f"Sending Nmap tasks for {len(targets_to_scan)} targets in project {nmap_scan_request.project_id}: {targets_to_scan}")
 
     semaphore = asyncio.Semaphore(config.optimal_semaphore)
 
     async def send_and_track_target(target_ip: str, target: PreparedTarget):
+        nonlocal summary
         try:
             async with semaphore:
                 lock_acquired = await redis_tracker.acquire_ip_lock(
@@ -354,16 +388,19 @@ async def send_nmap_tasks(
                     logger.warning(f"Lock already present for {target_ip} in project '{nmap_scan_request.project_id}' → skipping.")
                     target.valid = False
                     target.reason = TargetDeclineReason.ALREADY_IN_QUEUE
+                    summary.refused.already_in_queue += 1
                     return
 
                 try:
                     task_id = await send_nmap_task_for_target(target_ip, target.hostnames, nmap_scan_request, redis_tracker)
                     logger.info(f"Task sent for {target_ip} in project '{nmap_scan_request.project_id}' with ID {task_id}")
+                    summary.sent_to_scan += 1
                 except Exception as e:
                     logger.error(f"Error sending task for {target_ip}: {e}")
                     await redis_tracker.release_ip_lock(target_ip)
                     target.valid = False
                     target.reason = TargetDeclineReason.OTHER
+                    summary.refused.other += 1
         except Exception as e:
             logger.error(f"Unexpected error in send_and_track_target for {target_ip}: {e}")
 
@@ -374,69 +411,91 @@ async def send_nmap_tasks(
         )
     )
 
-    # Now just return the full prepared_targets → raw dict
-    return prepared_targets
+    return summary
 
 
-async def revoke_tasks(ip_task_pairs: List[tuple[str, str]], project_id: str) -> bool:
-    """Revoke tasks by IP → task_id pairs concurrently."""
+async def send_nmap_tasks(
+    nmap_scan_request: RunNmapWithProject,
+) -> ScanStartResponse:
+    """Send Nmap tasks to RabbitMQ and track task IDs in Redis. Return ScanStartResponse."""
+
+    prepared_targets, summary, redis_tracker = await prepare_scan_targets(nmap_scan_request)
+
+    summary = await send_scan_tasks(
+        prepared_targets,
+        nmap_scan_request,
+        redis_tracker,
+        summary
+    )
+
+    return ScanStartResponse(
+        summary=summary,
+        prepared_targets=prepared_targets
+    )
+
+
+async def revoke_tasks(ip_task_pairs: List[tuple[str, str]], project_id: str) -> int:
+    """Revoke tasks by IP → task_id pairs concurrently. Returns number of revoked tasks."""
     redis_tracker = RedisTaskTracker(project_id)
     semaphore = asyncio.Semaphore(config.optimal_semaphore)
+    revoked_counter = 0
 
     async def revoke(ip: str, tid: str):
+        nonlocal revoked_counter
         async with semaphore:
             try:
                 celery_app.control.revoke(tid, terminate=False)
                 logger.info(f"Task {tid} revoked for IP {ip}.")
-
                 await redis_tracker.remove_ip_task(ip)
                 await redis_tracker.release_ip_lock(ip)
                 logger.info(f"Removed IP {ip} and released lock in project {project_id}.")
+                revoked_counter += 1
             except Exception as e:
                 logger.error(f"Failed to revoke task {tid} for IP {ip}: {e}")
 
-    # Run all revokes concurrently
     await asyncio.gather(*(revoke(ip, tid) for ip, tid in ip_task_pairs))
+    return revoked_counter
 
-    return True
 
 
-async def revoke_project_tasks(
-    project_id: str
-) -> dict[str, bool]:
-    """Revoke tasks for a given project and user."""
+async def revoke_project_tasks(project_id: str) -> RevokeResponse:
     redis_tracker = RedisTaskTracker(project_id)
     ip_task_map = await redis_tracker.get_ip_task_map()
 
     if not ip_task_map:
-        logger.warning(f"No tasks found for project {project_id}.")
-        return {"status": "no_tasks"}
+        logger.info(f"No tasks found for project {project_id}.")
+        return RevokeResponse(status="no_tasks", revoked=0)
 
-    # Build explicit IP → task_id pairs
     ip_task_pairs = [
         (ip.decode() if isinstance(ip, bytes) else ip,
          tid.decode() if isinstance(tid, bytes) else tid)
         for ip, tid in ip_task_map.items()
     ]
 
-    await revoke_tasks(ip_task_pairs, project_id)
-
-    logger.info(f"Revoked tasks and sent cancel signal for project {project_id}.")
+    revoked_count = await revoke_tasks(ip_task_pairs, project_id)
+    logger.info(f"Revoked {revoked_count} tasks and sent cancel signal for project {project_id}.")
     send_cancel(project_id)
 
-    return {"status": "ok"}
+    return RevokeResponse(status="stopped", revoked=revoked_count)
 
 
-async def get_project_task_summary(project_id: str) -> dict[str, int]:
-    """Get summary of project tasks based on Redis tracking."""
+async def get_scan_status(project_id: str) -> ProjectTaskSummary:
     redis_tracker = RedisTaskTracker(project_id)
     try:
         ip_task_map = await redis_tracker.get_ip_task_map()
-        count = len(ip_task_map) if ip_task_map else 0
-        return {
-            "active_or_queued": count
-        }
+        running_targets = await redis_tracker.get_running_targets()
+
+        active_or_queued = len(ip_task_map) if ip_task_map else 0
+
+        return ProjectTaskSummary(
+            active_or_queued=active_or_queued,
+            running=len(running_targets),
+            running_targets=running_targets
+        )
     except Exception as e:
         logger.error(f"Failed to get project task summary: {e}")
-        return {"active_or_queued": 0}
-
+        return ProjectTaskSummary(
+            active_or_queued=0,
+            running=0,
+            running_targets=[]
+        )

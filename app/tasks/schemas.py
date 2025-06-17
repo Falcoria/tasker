@@ -1,15 +1,11 @@
 import re
-import ipaddress
-
-from pydantic.networks import IPvAnyAddress, IPvAnyNetwork
 
 from enum import Enum
 from uuid import UUID
+from typing import Optional, List
 
-from dataclasses import dataclass
-from typing import Optional, List, Annotated, Dict
-
-from pydantic import BaseModel, Field, constr, field_validator, PrivateAttr
+from pydantic import BaseModel, Field, field_validator, PrivateAttr
+from pydantic.networks import IPvAnyAddress, IPvAnyNetwork
 
 
 class TargetDeclineReason(str, Enum):
@@ -19,6 +15,23 @@ class TargetDeclineReason(str, Enum):
     PRIVATE_IP = "private_ip"
     OTHER = "other"
     FORBIDDEN = "forbidden"
+
+
+class RefusedCounts(BaseModel):
+    already_in_scanledger: int = 0
+    already_in_queue: int = 0
+    forbidden: int = 0
+    private_ip: int = 0
+    unresolvable: int = 0
+    other: int = 0
+
+
+class ScanStartSummary(BaseModel):
+    provided: int
+    duplicates_removed: int
+    resolved_ips: int
+    refused: RefusedCounts
+    sent_to_scan: int
 
 
 class PreparedTarget(BaseModel):
@@ -249,3 +262,26 @@ class RunNmapWithProject(RunNmapRequest):
         description="UUID of the project to run the scan on",
         example="123e4567-e89b-12d3-a456-426614174000"
     )
+
+
+class RunningTarget(BaseModel):
+    ip: str
+    hostnames: list[str]
+    worker: str
+    started_at: int
+
+
+class ProjectTaskSummary(BaseModel):
+    active_or_queued: int
+    running: int
+    running_targets: List[RunningTarget]
+
+
+class ScanStartResponse(BaseModel):
+    summary: ScanStartSummary
+    prepared_targets: dict[str, PreparedTarget]
+
+
+class RevokeResponse(BaseModel):
+    status: str  # "stopped" or "no_tasks"
+    revoked: int

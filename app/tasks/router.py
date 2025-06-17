@@ -2,7 +2,7 @@ from typing import Annotated, Tuple, List
 
 from fastapi import APIRouter, Depends, Body
 
-from .service import send_nmap_tasks, revoke_project_tasks, get_project_task_summary
+from .service import send_nmap_tasks, revoke_project_tasks, get_scan_status
 from .schemas import RunNmapRequest, RunNmapWithProject
 
 from app.admin.dependencies import validate_project_access
@@ -32,7 +32,7 @@ async def run_nmap(
 async def status(
         project_and_user: Annotated[str, Depends(validate_project_access)]
     ):
-    result = await get_project_task_summary(project_id=project_and_user[0].id)
+    result = await get_scan_status(project_id=project_and_user[0].id)
     return result
 
 

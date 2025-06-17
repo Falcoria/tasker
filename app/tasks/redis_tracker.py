@@ -1,5 +1,8 @@
+import json
+
 from app.redis_client import async_redis_client
 from app.logger import logger
+from app.tasks.schemas import RunningTarget
 
 
 class RedisTaskTracker:
@@ -52,3 +55,15 @@ class RedisTaskTracker:
         ips = {k.decode() if isinstance(k, bytes) else k for k in ip_task_map.keys()}
         logger.info(f"Targets in Redis for project {self.project}: {ips}")
         return ips
+    
+    def _running_targets_key(self):
+        return f"project:{self.project}:running_targets"
+    
+    async def get_running_targets(self) -> list[RunningTarget]:
+        key = self._running_targets_key()
+        running = await self.redis.lrange(key, 0, -1)
+        result = []
+        for entry in running:
+            data = json.loads(entry.decode() if isinstance(entry, bytes) else entry)
+            result.append(RunningTarget(**data))
+        return result
