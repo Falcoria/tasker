@@ -65,6 +65,7 @@ class Config(BaseSettings):
     # Concurrency
     concurrency_factor: int = 5
     max_semaphore_limit: int = 100
+    dns_resolve_semaphore_limit: int = 100
 
     # Allowed hosts to scan
     allowed_hosts: str = ""
