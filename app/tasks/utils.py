@@ -7,10 +7,10 @@ import aiodns
 from app.logger import logger
 
 
-resolver = aiodns.DNSResolver()
-
 async def fast_resolve_hostname(hostname: str) -> list[str]:
     try:
+        # TODO: how to gracefully use resolver not not initialize each time?
+        resolver = aiodns.DNSResolver()
         result = await resolver.gethostbyname(hostname, socket.AF_INET)
         return result.addresses
     except Exception:
