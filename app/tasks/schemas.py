@@ -7,6 +7,9 @@ from typing import Optional, List
 from pydantic import BaseModel, Field, field_validator, PrivateAttr
 from pydantic.networks import IPvAnyAddress, IPvAnyNetwork
 
+from app.admin.schemas import UserOut
+from falcoria_common.schemas.nmap import RunningNmapTarget
+
 
 class TargetDeclineReason(str, Enum):
     ALREADY_IN_SCANLEDGER = "already_in_scanledger"
@@ -210,6 +213,11 @@ class NmapTask(BaseModel):
     mode: ImportMode
 
 
+class NmapTaskMetadata(BaseModel):
+    ip: str
+    ports: str
+
+
 class RunNmapRequest(BaseModel):
     hosts: List[str]
     open_ports_opts: OpenPortsOpts
@@ -256,25 +264,14 @@ class RunNmapRequest(BaseModel):
 
 
 class RunNmapWithProject(RunNmapRequest):
-    project_id: Optional[str] = Field(
-        default=None,
-        title="Project ID",
-        description="UUID of the project to run the scan on",
-        example="123e4567-e89b-12d3-a456-426614174000"
-    )
-
-
-class RunningTarget(BaseModel):
-    ip: str
-    hostnames: list[str]
-    worker: str
-    started_at: int
+    project_id: str = ""
+    user: Optional[UserOut] = None
 
 
 class ProjectTaskSummary(BaseModel):
     active_or_queued: int
     running: int
-    running_targets: List[RunningTarget]
+    running_targets: List[RunningNmapTarget]
 
 
 class ScanStartResponse(BaseModel):

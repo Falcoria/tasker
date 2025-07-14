@@ -1,3 +1,4 @@
+import time
 import uuid
 from typing import Annotated, Optional, Tuple
 
@@ -20,6 +21,12 @@ from app.constants.messages import Message
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
+def is_token_expired(expiration_timestamp: Optional[int]) -> bool:
+    if expiration_timestamp is None:
+        return False  # No expiration set
+    return time.time() > expiration_timestamp
+
+
 async def get_user_by_token(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer_scheme)]
 ) -> Optional[UserPrivate]:
@@ -34,7 +41,7 @@ async def get_user_by_token(
     token = credentials.credentials
     hashed_token = hash_password_without_salt(token)
     current_user = await userdb_by_token(hashed_token)
-    if current_user is None:
+    if current_user is None or is_token_expired(current_user.token_expires_at):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=Message.INVALID_AUTHENTICATION,

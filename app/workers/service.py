@@ -2,44 +2,39 @@ import json
 import asyncio
 from typing import Dict
 
-from app.redis_client import redis_client
-from app.constants.redis_keys import WORKER_IP_KEY
+from app.redis_client import async_redis_client
 from app.celery_app import send_worker_service_task
 from app.logger import logger
 from app.config import config
 
-from .schemas import TaskNames
+from .schemas import TaskNames, WorkerIPData
+from falcoria_common.redis_worker_tracker import RedisWorkerTracker
 
 
-def get_all_worker_ips() -> Dict[str, str]:
+async def get_all_worker_ips() -> dict[str, WorkerIPData]:
     """
-    Fetch all registered worker IPs from Redis.
-    Returns a dictionary:
+    Returns:
     {
-        hostname: {
-            "ip": ip,
-            "last_updated": timestamp
-        }
+        hostname: WorkerIPData
     }
     """
-    result = {}
-    keys = redis_client.keys("worker_ip:*")
+    tracker = RedisWorkerTracker(async_redis_client)
+    raw_ips = await tracker.get_worker_ips_raw()
 
-    for key in keys:
-        hostname = key.decode().split(":", 1)[1]
-        raw_value = redis_client.get(key)
-        if raw_value:
-            try:
-                ip_data = json.loads(raw_value.decode())
-                result[hostname] = {
-                    "ip": ip_data.get("ip", "unknown"),
-                    "last_updated": ip_data.get("last_updated", 0)
-                }
-            except Exception:
-                result[hostname] = {
-                    "ip": raw_value.decode(),
-                    "last_updated": 0
-                }
+    result: dict[str, WorkerIPData] = {}
+
+    for hostname, raw_value in raw_ips.items():
+        try:
+            ip_data = json.loads(raw_value)
+            result[hostname] = WorkerIPData(
+                ip=ip_data.get("ip", "unknown"),
+                last_updated=ip_data.get("last_updated", 0)
+            )
+        except Exception:
+            result[hostname] = WorkerIPData(
+                ip=raw_value,
+                last_updated=0
+            )
 
     return result
 
@@ -53,18 +48,15 @@ async def periodic_update_worker_ip_task(stop_event: asyncio.Event):
         except Exception as e:
             logger.exception(f"Error in periodic_update_worker_ip_task: {e}")
         try:
-            await asyncio.wait_for(stop_event.wait(), timeout=config.worker_ip_update_ttl)  # 1 hour
+            await asyncio.wait_for(stop_event.wait(), timeout=config.worker_ip_update_ttl)
         except asyncio.TimeoutError:
-            pass  # normal wake-up
+            pass
 
 
 def register_periodic_update_worker_ip_task(lifespan_scope_tasks: list):
     """
     Registers periodic_update_worker_ip_task to run in background.
-    App_lifespan will pass the list to collect background tasks.
     """
     stop_event = asyncio.Event()
     task = asyncio.create_task(periodic_update_worker_ip_task(stop_event))
-
-    # Append a (task, stop_event) tuple to the list so the main lifespan can handle it
     lifespan_scope_tasks.append((task, stop_event))

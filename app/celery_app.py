@@ -3,10 +3,10 @@ from kombu import Exchange, Queue
 from kombu.common import Broadcast
 
 from app.config import config
-from app.tasks.schemas import NmapTask
 from app.tasks.schemas import TaskNames
 from app.workers.schemas import TaskNames as WorkerTaskNames
 from app.logger import logger
+from falcoria_common.schemas.nmap import NmapTask
 
 
 celery_app = Celery(config.celery_app_name, broker=config.rabbitmq_url)
@@ -46,12 +46,12 @@ def send_scan(nmap_task: NmapTask) -> str:
     return result.id
 
 
-def send_cancel(project: str) -> str:
+def send_cancel(task_ids: list[str]) -> str:
     """Broadcast cancel task to all workers."""
-    logger.info(f"Broadcasting cancel task for project: {project}")
+    logger.info(f"Broadcasting cancel task for project")
     result = celery_app.send_task(
         name=TaskNames.PROJECT_CANCEL,
-        args=[str(project)],
+        args=[{'task_ids': task_ids}],
         queue=config.nmap_cancel_queue_name,
     )
     return result.id

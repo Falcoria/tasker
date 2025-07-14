@@ -1,50 +1,17 @@
 import json
+from typing import Any
 
 from app.redis_client import async_redis_client
+from falcoria_common.redis.redis_task_tracker import BaseAsyncRedisTracker
+from falcoria_common.redis.redis_keys import RedisKeyBuilder
 from app.logger import logger
-from app.tasks.schemas import RunningTarget
+
+from .schemas import NmapTaskMetadata
 
 
-class RedisTaskTracker:
+class AsyncRedisTaskTracker(BaseAsyncRedisTracker):
     def __init__(self, project: str):
-        self.project = project
-        self.redis = async_redis_client
-
-    def _task_ids_key(self) -> str:
-        return f"project:{self.project}:task_ids"
-
-    def _ip_task_map_key(self) -> str:
-        return f"project:{self.project}:ip_task_map"
-
-    def _ip_lock_key(self, ip: str) -> str:
-        return f"project:{self.project}:ip_task_lock:{ip}"
-
-    async def track_task_id(self, task_id: str):
-        await self.redis.rpush(self._task_ids_key(), task_id)
-
-    async def get_task_ids(self):
-        return await self.redis.lrange(self._task_ids_key(), 0, -1)
-
-    async def remove_task_id(self, task_id: str):
-        await self.redis.lrem(self._task_ids_key(), 0, task_id)
-
-    async def track_ip_task(self, ip: str, task_id: str):
-        await self.redis.hset(self._ip_task_map_key(), ip, task_id)
-
-    async def get_ip_task_map(self):
-        return await self.redis.hgetall(self._ip_task_map_key())
-
-    async def remove_ip_task(self, ip: str):
-        await self.redis.hdel(self._ip_task_map_key(), ip)
-
-    async def acquire_ip_lock(self, ip: str, ttl_seconds: int = 300) -> bool:
-        key = f"project:{self.project}:ip_task_lock:{ip}"
-        was_set = await self.redis.set(key, "1", ex=ttl_seconds, nx=True)
-        return was_set is True
-
-    async def release_ip_lock(self, ip: str):
-        key = f"project:{self.project}:ip_task_lock:{ip}"
-        await self.redis.delete(key)
+        super().__init__(project, async_redis_client)
 
     async def get_targets(self) -> set[str]:
         ip_task_map = await self.get_ip_task_map()
@@ -56,14 +23,97 @@ class RedisTaskTracker:
         logger.info(f"Targets in Redis for project {self.project}: {ips}")
         return ips
     
-    def _running_targets_key(self):
-        return f"project:{self.project}:running_targets"
+    async def track_nmap_task(self, task_id: str, project_id: str, user_id: str, ip: str, ports: str) -> Any:
+        project_key = RedisKeyBuilder.project_task_ids_key(project_id)      # to track tasks by project
+        user_key = RedisKeyBuilder.user_task_ids_key(user_id)               # to track tasks by user
+        ip_key = RedisKeyBuilder.project_ip_task_ids_key(project_id, ip)    # to cancel tasks by IP
+        meta_key = RedisKeyBuilder.task_metadata_nmap_key(task_id)          # to track metadata, for revocation
+
+        async with self.redis.pipeline() as pipe:
+            pipe.sadd(project_key, task_id)
+            pipe.sadd(user_key, task_id)
+            pipe.sadd(ip_key, task_id)
+            pipe.hset(meta_key, mapping={"ip": ip, "ports": ports})
+            results = await pipe.execute()
+
+        logger.info(f"Tracked Nmap task {task_id} for project {project_id}, user {user_id}, IP {ip}: {results}")
+        return results
+
+    async def get_locked_ips(self, project_id) -> set[str]:
+        pattern = RedisKeyBuilder.lock_ip_ports_key(project_id, "*", "*")
+        cursor = 0
+        locked_ips = set()
+
+        while True:
+            cursor, keys = await self.redis.scan(cursor=cursor, match=pattern, count=2000)
+            for key in keys:
+                parts = key.decode().split(":")
+                if len(parts) >= 6:
+                    locked_ips.add(parts[4])  # parts = ['lock', 'project', project_id, 'ip', ip, 'ports', ports]
+            if cursor == 0:
+                break
+
+        return locked_ips
+
+    async def get_task_metadata(self, task_id: str) -> NmapTaskMetadata | None:
+        key = RedisKeyBuilder.task_metadata_nmap_key(task_id)
+        raw_data = await self.redis.hgetall(key)
+        if not raw_data:
+            return None
+
+        decoded = {k.decode(): v.decode() for k, v in raw_data.items()}
+
+        try:
+            return NmapTaskMetadata(**decoded)
+        except Exception as e:
+            logger.warning(f"Invalid task metadata for task_id {task_id}: {e}")
+            return None
+
+
+    async def get_running_targets_raw(self) -> list[dict]:
+        pattern = RedisKeyBuilder.running_tasks_key("*", "*")
+        cursor = 0
+        raw_targets = []
+
+        while True:
+            cursor, keys = await self.redis.scan(cursor=cursor, match=pattern, count=2000)
+            for key in keys:
+                entries = await self.redis.lrange(key, 0, -1)
+                for entry in entries:
+                    try:
+                        decoded = json.loads(entry)
+                        raw_targets.append(decoded)
+                    except Exception as e:
+                        logger.warning(f"Invalid JSON in {key}: {e}")
+            if cursor == 0:
+                break
+
+        return raw_targets
     
-    async def get_running_targets(self) -> list[RunningTarget]:
-        key = self._running_targets_key()
-        running = await self.redis.lrange(key, 0, -1)
-        result = []
-        for entry in running:
-            data = json.loads(entry.decode() if isinstance(entry, bytes) else entry)
-            result.append(RunningTarget(**data))
-        return result
+    async def get_queued_tasks(self, project_id) -> list[str]:
+        project_key = RedisKeyBuilder.project_task_ids_key(project_id) 
+        tasks = await self.redis.smembers(project_key)
+        return [task.decode() for task in tasks] if tasks else []
+    
+    async def cleanup_task_metadata(
+        self,
+        task_id: str,
+        project_id: str,
+        ip: str,
+        port_string: str
+    ) -> None:
+        # Keys to clean
+        project_key = RedisKeyBuilder.project_task_ids_key(project_id)
+        user_key = None  # user_id is not available here; optionally skip or include in metadata if needed
+        ip_key = RedisKeyBuilder.project_ip_task_ids_key(project_id, ip)
+        meta_key = RedisKeyBuilder.task_metadata_nmap_key(task_id)
+        lock_key = RedisKeyBuilder.lock_ip_ports_key(project_id, ip, port_string)
+
+        pipe = self.redis.pipeline()
+        pipe.srem(project_key, task_id)
+        pipe.srem(ip_key, task_id)
+        pipe.delete(meta_key)
+        pipe.delete(lock_key)
+        await pipe.execute()
+
+        logger.info(f"Cleaned up Redis entries for task {task_id}, IP {ip}")

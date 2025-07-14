@@ -10,3 +10,4 @@ urllib3==2.4.0
 uvicorn[standard]
 httpx==0.28.1
 aiodns==3.4.0
+git+https://github.com/Falcoria/falcoria-common.git@main

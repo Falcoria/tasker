@@ -22,9 +22,8 @@ async def run_nmap(
     project_and_user: Annotated[Tuple[ProjectDB, UserDB], Depends(validate_project_access)],
     user_data: Annotated[RunNmapRequest, Body()],
 ):
-    nmap_scan_request = RunNmapWithProject.model_validate(user_data.model_dump())
-    nmap_scan_request.project_id = project_and_user[0].id
-    result = await send_nmap_tasks(nmap_scan_request)
+    project, user = project_and_user
+    result = await send_nmap_tasks(user_data, project, user)
     return result
 
 
