@@ -24,9 +24,9 @@ def expand_cidr(cidr: str) -> list[str]:
 
 
 async def fast_resolve_hostname(hostname: str) -> list[str]:
+    loop = asyncio.get_running_loop()
     try:
-        result = await resolver.gethostbyname(hostname, socket.AF_INET)
-        return result.addresses
+        return [res[4][0] for res in await loop.getaddrinfo(hostname, None, family=socket.AF_INET, proto=socket.IPPROTO_TCP)]
     except Exception:
         return []
 
