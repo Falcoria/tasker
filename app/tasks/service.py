@@ -16,9 +16,37 @@ from app.celery_app import send_scan, send_cancel, celery_app
 from app.admin.schemas import UserOut
 from app.admin.models import UserDB, ProjectDB
 
-from .schemas import ImportMode, PreparedTarget, RunNmapRequest
+from .schemas import PreparedTarget, RunNmapRequest, InputToScanTarget
 
 from falcoria_common.schemas.nmap import TaskUser, NmapTask, RunningNmapTarget
+from falcoria_common.schemas.enums.common import ImportMode
+
+
+def build_input_to_scan_mapping(user_inputs, prepared_targets):
+    """
+    Map each user input to the scanned IP and all hostnames for that IP.
+    Returns a list of InputToScanTarget.
+    """
+    input_to_scan = []
+    for user_input in user_inputs:
+        found_ip = None
+        for ip, target in prepared_targets.items():
+            if user_input == ip or user_input in target.hostnames:
+                found_ip = ip
+                break
+        if found_ip:
+            input_to_scan.append(InputToScanTarget(
+                input=user_input,
+                scanned_ip=found_ip,
+                all_hostnames_for_ip=prepared_targets[found_ip].hostnames
+            ))
+        else:
+            input_to_scan.append(InputToScanTarget(
+                input=user_input,
+                scanned_ip=None,
+                all_hostnames_for_ip=[]
+            ))
+    return input_to_scan
 
 
 async def resolve_targets(entries: list[str]) -> dict:
@@ -92,10 +120,19 @@ async def prepare_scan_targets(nmap_scan_request: RunNmapWithProject) -> tuple:
     prepared = await process_scan_targets(nmap_scan_request.project_id, nmap_scan_request.mode, prepared, tracker)
     filter_allowed_targets(prepared)
 
+    # Count hostnames collapsed to IP: number of input hostnames that were merged into a single IP
+    hostnames_collapsed_to_ip = 0
+    for target in prepared.values():
+        if len(target.hostnames) > 1:
+            hostnames_collapsed_to_ip += len(target.hostnames) - 1
+
+    input_to_scan = build_input_to_scan_mapping(nmap_scan_request.hosts, prepared)
+
     summary = ScanStartSummary(
         provided=len(nmap_scan_request.hosts),
         duplicates_removed=len(nmap_scan_request.hosts) - len(deduped),
         resolved_ips=len(prepared),
+        hostnames_collapsed_to_ip=hostnames_collapsed_to_ip,
         refused=RefusedCounts(),
         sent_to_scan=0
     )
@@ -105,7 +142,7 @@ async def prepare_scan_targets(nmap_scan_request: RunNmapWithProject) -> tuple:
             reason_key = target.reason.value
             setattr(summary.refused, reason_key, getattr(summary.refused, reason_key, 0) + 1)
 
-    return prepared, summary, tracker
+    return prepared, summary, tracker, input_to_scan
 
 
 async def send_single_nmap_task(target_ip: str, target: PreparedTarget, req: RunNmapWithProject, tracker: AsyncRedisTaskTracker) -> str:
@@ -126,7 +163,8 @@ async def send_single_nmap_task(target_ip: str, target: PreparedTarget, req: Run
         include_services=req.include_services,
         mode=req.mode,
         user=task_user,
-        open_ports_str=open_ports_str
+        open_ports_str=open_ports_str,
+        track_history=True
     )
 
     task_id = send_scan(task)
@@ -200,9 +238,9 @@ async def send_nmap_tasks(
         user=UserOut.model_validate(user.model_dump())
     )
 
-    prepared, summary, tracker = await prepare_scan_targets(nmap_scan_request)
+    prepared, summary, tracker, input_to_scan = await prepare_scan_targets(nmap_scan_request)
     summary = await send_scan_tasks(prepared, nmap_scan_request, tracker, summary)
-    return ScanStartResponse(summary=summary, prepared_targets=prepared)
+    return ScanStartResponse(summary=summary, prepared_targets=prepared, input_to_scan=input_to_scan)
 
 
 async def revoke_tasks(task_ids: list[str], project_id: str) -> int:

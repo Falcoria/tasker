@@ -8,7 +8,7 @@ from app.logger import logger
 from app.config import config
 
 from .schemas import TaskNames, WorkerIPData
-from falcoria_common.redis_worker_tracker import RedisWorkerTracker
+from falcoria_common.redis.redis_worker_tracker import RedisWorkerTracker
 
 
 async def get_all_worker_ips() -> dict[str, WorkerIPData]:

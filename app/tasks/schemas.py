@@ -9,6 +9,7 @@ from pydantic.networks import IPvAnyAddress, IPvAnyNetwork
 
 from app.admin.schemas import UserOut
 from falcoria_common.schemas.nmap import RunningNmapTarget
+from falcoria_common.schemas.enums.common import ImportMode
 
 
 class TargetDeclineReason(str, Enum):
@@ -33,6 +34,7 @@ class ScanStartSummary(BaseModel):
     provided: int
     duplicates_removed: int
     resolved_ips: int
+    hostnames_collapsed_to_ip: int = 0
     refused: RefusedCounts
     sent_to_scan: int
 
@@ -52,18 +54,6 @@ class PreparedTarget(BaseModel):
     @classmethod
     def unique_hostnames(cls, v):
         return list(set(v))
-
-
-class ImportMode(str, Enum):
-    INSERT = "insert"
-    REPLACE = "replace"
-    UPDATE = "update"
-    APPEND = "append"
-
-
-class TaskNames(str, Enum):
-    PROJECT_SCAN = "project.nmap.scan"
-    PROJECT_CANCEL = "project.nmap.cancel"
 
 
 class TcpScanType(str, Enum):
@@ -274,9 +264,15 @@ class ProjectTaskSummary(BaseModel):
     running_targets: List[RunningNmapTarget]
 
 
+class InputToScanTarget(BaseModel):
+    input: str
+    scanned_ip: Optional[str] = None
+    all_hostnames_for_ip: list[str]
+
 class ScanStartResponse(BaseModel):
     summary: ScanStartSummary
     prepared_targets: dict[str, PreparedTarget]
+    input_to_scan: list[InputToScanTarget]
 
 
 class RevokeResponse(BaseModel):

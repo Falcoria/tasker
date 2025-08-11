@@ -14,6 +14,7 @@ class AsyncRedisTaskTracker(BaseAsyncRedisTracker):
         super().__init__(project, async_redis_client)
 
     async def get_targets(self) -> set[str]:
+        """ Retrieve all unique IPs tracked in Redis for the current project."""
         ip_task_map = await self.get_ip_task_map()
         if not ip_task_map:
             logger.warning(f"No IPs found in Redis for project {self.project}.")

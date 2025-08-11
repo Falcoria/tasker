@@ -1,7 +1,7 @@
 from app.connectors.scanledger_connector import scanledger_connector
 from app.logger import logger
 
-from app.tasks.schemas import ImportMode
+from falcoria_common.schemas.enums.common import ImportMode
 
 
 async def get_known_targets(project_id: str) -> set:
