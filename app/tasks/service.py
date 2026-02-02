@@ -49,11 +49,11 @@ def build_input_to_scan_mapping(user_inputs, prepared_targets):
     return input_to_scan
 
 
-async def resolve_targets(entries: list[str]) -> dict:
+async def resolve_targets(entries: list[str], single_resolve: bool) -> dict:
     prepared = {}
     sem = asyncio.Semaphore(config.dns_resolve_semaphore_limit)
 
-    async def resolve_entry(entry: str):
+    async def resolve_entry(entry: str, single_resolve=single_resolve):
         async with sem:
             if "/" in entry:
                 for ip in expand_cidr(entry):
@@ -63,7 +63,7 @@ async def resolve_targets(entries: list[str]) -> dict:
                 prepared[entry] = PreparedTarget(hostnames=[], valid=True)
             else:
                 for _ in range(3):
-                    ips = await resolve_and_check_public(entry)
+                    ips = await resolve_and_check_public(entry, single_resolve=single_resolve)
                     if ips:
                         for ip in ips:
                             target = prepared.setdefault(ip, PreparedTarget(hostnames=[], valid=True))
@@ -72,7 +72,7 @@ async def resolve_targets(entries: list[str]) -> dict:
                     await asyncio.sleep(1)
                 prepared[entry] = mark_unresolvable(entry)
 
-    await asyncio.gather(*(resolve_entry(e) for e in entries))
+    await asyncio.gather(*(resolve_entry(e, single_resolve=single_resolve) for e in entries))
     return prepared
 
 
@@ -114,17 +114,18 @@ def filter_allowed_targets(prepared_targets: dict[str, PreparedTarget]) -> None:
 
 async def prepare_scan_targets(nmap_scan_request: RunNmapWithProject) -> tuple:
     deduped = remove_duplicates(nmap_scan_request.hosts)
-    prepared = await resolve_targets(deduped)
+    prepared = await resolve_targets(deduped, nmap_scan_request.single_resolve)
     tracker = AsyncRedisTaskTracker(nmap_scan_request.project_id)
 
     prepared = await process_scan_targets(nmap_scan_request.project_id, nmap_scan_request.mode, prepared, tracker)
     filter_allowed_targets(prepared)
 
-    # Count hostnames collapsed to IP: number of input hostnames that were merged into a single IP
+    # Count hostnames collapsed to IP: count how many hostname inputs resolved to IPs that already existed
     hostnames_collapsed_to_ip = 0
     for target in prepared.values():
-        if len(target.hostnames) > 1:
-            hostnames_collapsed_to_ip += len(target.hostnames) - 1
+        # Count all hostnames that were collapsed into this IP target
+        if target.hostnames:
+            hostnames_collapsed_to_ip += len(target.hostnames)
 
     input_to_scan = build_input_to_scan_mapping(nmap_scan_request.hosts, prepared)
 

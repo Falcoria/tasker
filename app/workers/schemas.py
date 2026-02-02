@@ -10,3 +10,4 @@ class TaskNames(str, Enum):
 class WorkerIPData(BaseModel):
     ip: str
     last_updated: int
+    last_seen: int

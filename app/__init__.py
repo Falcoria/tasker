@@ -1,12 +1,14 @@
 import contextlib
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 
 from app.config import config
 from app.tasks.router import tasks_router
 from app.workers.router import workers_router
 from app.error_handlers import register_error_handlers
 from app.workers.service import register_periodic_update_worker_ip_task
+
+from app.admin.dependencies import validate_project_access
 
 
 @contextlib.asynccontextmanager
@@ -37,5 +39,5 @@ def create_app():
     register_error_handlers(fastapi_app)
 
     fastapi_app.include_router(tasks_router, prefix="/tasks")
-    fastapi_app.include_router(workers_router, prefix="/workers")
+    fastapi_app.include_router(workers_router, prefix="/workers", dependencies=[Depends(validate_project_access)])
     return fastapi_app

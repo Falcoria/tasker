@@ -3,7 +3,7 @@ from typing import Annotated, Tuple, List
 from fastapi import APIRouter, Depends, Body
 
 from .service import send_nmap_tasks, revoke_project_tasks, get_scan_status
-from .schemas import RunNmapRequest, RunNmapWithProject
+from .schemas import RunNmapRequest
 
 from app.admin.dependencies import validate_project_access
 from app.admin.models import UserDB, ProjectDB

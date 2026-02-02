@@ -209,11 +209,13 @@ class NmapTaskMetadata(BaseModel):
 
 
 class RunNmapRequest(BaseModel):
+    """User's request to run an Nmap scan."""
     hosts: List[str]
     open_ports_opts: OpenPortsOpts
     service_opts: ServiceOpts
     timeout: int = Field(..., ge=1, le=60*60*24, description="Timeout in seconds for the scan")
     include_services: bool = Field(..., description="Include service detection in the scan")
+    single_resolve: bool = Field(default=False, description="Resolve hostnames only in one IP")
     mode: ImportMode = Field(..., description="Import mode for the scan results")
 
     @field_validator('hosts', mode='before')
