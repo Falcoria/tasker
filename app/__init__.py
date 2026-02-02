@@ -8,7 +8,7 @@ from app.workers.router import workers_router
 from app.error_handlers import register_error_handlers
 from app.workers.service import register_periodic_update_worker_ip_task
 
-from app.admin.dependencies import validate_project_access
+from app.admin.dependencies import validate_user_access
 
 
 @contextlib.asynccontextmanager
@@ -39,5 +39,5 @@ def create_app():
     register_error_handlers(fastapi_app)
 
     fastapi_app.include_router(tasks_router, prefix="/tasks")
-    fastapi_app.include_router(workers_router, prefix="/workers", dependencies=[Depends(validate_project_access)])
+    fastapi_app.include_router(workers_router, prefix="/workers", dependencies=[Depends(validate_user_access)])
     return fastapi_app
