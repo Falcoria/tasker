@@ -6,7 +6,7 @@ COPY requirements.txt .
 RUN python3.13 -m venv venv && \
     . venv/bin/activate && \
     pip install --upgrade pip && \
-    pip install -r requirements.txt
+    pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
