@@ -1,5 +1,4 @@
 import time
-import json
 import asyncio
 
 from app.redis_client import async_redis_client
