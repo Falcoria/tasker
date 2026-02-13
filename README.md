@@ -1,81 +1,75 @@
 # Tasker
 
-Tasker is the orchestration service in the Falcoria system. It distributes scan tasks to workers, manages scan lifecycles, and tracks scan status using HTTP APIs and Celery.
+Tasker is the orchestration component in the [Falcoria](https://github.com/Falcoria/falcoria) distributed scanning system. It sits between the user (via falcli or API) and the workers. When a scan is submitted, Tasker prepares the targets before anything gets scanned: expands CIDRs, resolves hostnames, removes duplicates, and checks what's already been scanned or queued.
 
-## Features
+The output is a set of discrete scan tasks, each targeting a single IP with a defined port range. Tasks go into the queue (RabbitMQ), workers pick them up.
 
-- **Distributed Scanning:** Sends validated scan requests to distributed workers using Celery and RabbitMQ.
-- **Flexible Input:** Accepts hostnames, IPs, and CIDRs; deduplicates and resolves hostnames to IPs.
-- **Scan Tracking:** Tracks scan status, phases, and results using Redis and ScanLedger.
-- **Multi-phase Scans:** Supports chaining logic for multi-phase scans (e.g., open ports → service detection).
-- **API-First:** Exposes a FastAPI-based HTTP API for scan management and status.
-- **Worker Management:** Tracks worker status and IPs.
-- **Secure:** Supports TLS for secure communication.
-- **Extensible:** Integrates with ScanLedger and Worker agents for result storage and worker management.
+## Quick start
 
-## Architecture
+The fastest way to run everything (ScanLedger + Tasker + Worker + Postgres + Redis + RabbitMQ):
 
-- **API:** FastAPI app (`app/`) exposes endpoints for scan management under `/tasks`.
-- **Task Distribution:** Uses Celery with RabbitMQ for distributing scan jobs to workers.
-- **State Tracking:** Uses Redis for tracking scan tasks, locks, and worker status.
-- **ScanLedger Integration:** Communicates with ScanLedger for known targets and result storage.
-- **Workers:** Separate worker services execute scan tasks and report results.
+```bash
+git clone https://github.com/Falcoria/falcoria.git
+cd falcoria
+./quickstart.sh
+```
 
-## Endpoints
+See the [all-in-one repo](https://github.com/Falcoria/falcoria) for details.
 
-- `POST /tasks/{project_id}/run-nmap`  
-  Start a new scan for a project. Accepts a JSON body with hosts and scan options.
+## Standalone setup
 
-- `GET /tasks/{project_id}/status`  
-  Get the current scan status for a project.
+For distributed deployments where Tasker runs on its own machine:
 
-- `GET /tasks/{project_id}/stop-nmap`  
-  Stop all running scans for a project.
+```bash
+git clone https://github.com/Falcoria/tasker.git
+cd tasker
+cp .env.example .env  # edit connection settings
+```
 
-- `GET /workers/ips`  
-  List all known worker IPs.
+### Docker
 
-- `GET /health`  
-  Health check endpoint.
+```bash
+docker compose up --build
+```
 
-## Usage
+### Manual (development)
 
-1. **Start the API server:**
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.app:fastapi_app --host 0.0.0.0 --port 8001
+```
 
-   ```bash
-   uvicorn app.app:fastapi_app --reload --host 0.0.0.0 --port 8001
-   ```
-
-2. **Start Celery workers:**
-
-   ```bash
-   celery -A app.celery_app.celery_app worker --loglevel=info
-   ```
-
-3. **Trigger a scan via API or CLI:**
-   - Use the `/tasks/{project_id}/run-nmap` endpoint or the `falc.py` CLI tool.
-
-4. **Check scan status:**
-   - Use `/tasks/{project_id}/status` or the CLI.
-
-5. **Stop scans:**
-   - Use `/tasks/{project_id}/stop-nmap`.
+Tasker runs on port `8443` (HTTPS) in Docker, `8001` in development. API docs at `/docs`.
 
 ## Configuration
 
-Configuration is managed via environment variables or `.env` file. See `app/config.py` for all options, including:
+Environment variables in `.env`:
 
 - Redis and RabbitMQ connection details
-- Logger settings
-- TLS certificate generation (`generate-tls-bundle.sh`)
+- ScanLedger URL and token (Tasker checks ScanLedger for already-scanned targets)
+- TLS settings
 
-## Development
+See `app/config.py` for all options.
 
-- Install dependencies:
+## API endpoints
 
-  ```bash
-  pip install -r requirements.txt
-  ```
+- `POST /tasks/{project_id}/run-nmap` — submit targets for scanning
+- `GET /tasks/{project_id}/status` — current scan status
+- `GET /tasks/{project_id}/stop-nmap` — stop running scans and clear queue
+- `GET /workers/ips` — list active worker IPs
+- `GET /health` — health check
+
+In practice, these are called through [falcli](https://github.com/Falcoria/falcli) rather than directly.
+
+## Documentation
+
+Full documentation: [https://falcoria.github.io/falcoria-docs/](https://falcoria.github.io/falcoria-docs/)
+
+- [Architecture](https://falcoria.github.io/falcoria-docs/architecture/) — how Tasker fits into the system
+- [Deduplication](https://falcoria.github.io/falcoria-docs/concepts/deduplication/) — what happens to targets before scanning
+- [Distribution](https://falcoria.github.io/falcoria-docs/concepts/distribution/) — distributed scanning model
 
 ## License
 
